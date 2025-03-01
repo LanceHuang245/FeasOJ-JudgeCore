@@ -33,7 +33,7 @@ func TestLoggerMiddleware(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	req.RemoteAddr = "192.168.0.1:12345"
+	req.RemoteAddr = "192.168.0.1:12346"
 
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, req)

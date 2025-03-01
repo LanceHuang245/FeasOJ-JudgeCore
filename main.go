@@ -6,6 +6,7 @@ import (
 	"log"
 	"main/internal/config"
 	"main/internal/global"
+	"main/internal/judge"
 	"main/internal/router"
 	"main/internal/utils"
 	"os"
@@ -24,6 +25,7 @@ func main() {
 	// 定义目录映射
 	dirs := map[string]*string{
 		"certificate": &global.CertDir,
+		"configs":     &global.ConfigDir,
 		"codefiles":   &global.CodeDir,
 		"logs":        &global.LogDir,
 	}
@@ -43,6 +45,15 @@ func main() {
 	}
 	defer utils.CloseLogger(logFile)
 
+	// 初始化配置
+	config.InitConfig()
+
+	// 初始化数据库
+	if utils.ConnectSql() == nil {
+		return
+	}
+	log.Println("[FeasOJ] MySQL initialization complete")
+
 	consulConfig := api.DefaultConfig()
 	consulConfig.Address = config.ConsulAddress
 	log.Println("[FeasOJ] Connecting to Consul...")
@@ -52,9 +63,21 @@ func main() {
 		return
 	}
 
+	// 构建沙盒镜像
+	if judge.BuildImage() {
+		log.Println("[FeasOJ] SandBox builds successfully")
+	} else {
+		log.Println("[FeasOJ] SandBox builds fail, please make sure Docker is running and up to date")
+		return
+	}
+
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
 	router.LoadRouter(r)
+
+	judge.InitializeContainerPool(config.MaxSandbox)
+
+	go judge.ProcessJudgeTasks()
 
 	startServer := func(protocol, address, certFile, keyFile string) {
 		for {
@@ -84,7 +107,7 @@ func main() {
 	go func() {
 		scanner := bufio.NewScanner(os.Stdin)
 		for scanner.Scan() {
-			if scanner.Text() == "quit" {
+			if scanner.Text() == "exit" || scanner.Text() == "EXIT" {
 				log.Println("[FeasOJ] The server is being shut down, please be patient to wait for the container to be closed")
 				os.Exit(0)
 			}
@@ -94,9 +117,10 @@ func main() {
 	// 等待中断信号关闭服务器
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	log.Println("[FeasOJ] Input 'quit' or Ctrl+C to stop the server")
+	log.Println("[FeasOJ] Input 'exit' or Ctrl+C to stop the server")
 	<-quit
 
-	log.Println("[FeasOJ] The server is shutting down...")
+	log.Println("[FeasOJ] The server is shutting down, please be patient to wait for the container to be closed")
+	judge.ShutdownContainerPool()
 	utils.CloseLogger(logFile)
 }

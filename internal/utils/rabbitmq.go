@@ -1,38 +1,74 @@
 package utils
 
 import (
-	"fmt"
-	"log"
+	"encoding/json"
 	"main/internal/config"
+	"main/internal/global"
 
-	"github.com/hashicorp/consul/api"
+	amqp "github.com/rabbitmq/amqp091-go"
 )
 
-// 服务注册示例
-func RegisterService(client *api.Client) {
-	agent := client.Agent()
-
-	var protocol string
-	if config.EnableHTTPS {
-		protocol = "https"
-	} else {
-		protocol = "http"
-	}
-
-	registration := &api.AgentServiceRegistration{
-		ID:   "JudgeCore-1",      // 服务唯一ID
-		Name: "JudgeCore",        // 服务名称
-		Port: config.ServicePort, // 服务端口
-		Check: &api.AgentServiceCheck{
-			HTTP:     fmt.Sprintf("%s://%s:%d/api/v1/judgecore/health", protocol, config.ServiceAddress, config.ServicePort), // 健康检查地址
-			Interval: "20s",
-			Timeout:  "6s",
-		},
-	}
-
-	err := agent.ServiceRegister(registration)
+// ConnectRabbitMQ 建立与 RabbitMQ 的连接
+func ConnectRabbitMQ() (*amqp.Connection, *amqp.Channel, error) {
+	// 连接到 RabbitMQ 服务
+	conn, err := amqp.Dial(config.RabbitMQAddress)
 	if err != nil {
-		log.Println("[FeasOJ] JudgeCore service registration failed:", err)
+		return nil, nil, err
 	}
-	log.Println("[FeasOJ] JudgeCore service registered successfully")
+
+	// 创建一个通道
+	ch, err := conn.Channel()
+	if err != nil {
+		conn.Close()
+		return nil, nil, err
+	}
+
+	// 确保队列存在
+	_, err = ch.QueueDeclare(
+		"judgeTask", // 队列名称
+		true,        // 是否持久化
+		false,       // 是否自动删除
+		false,       // 是否排他
+		false,       // 是否等待消费者
+		nil,         // 额外参数
+	)
+	if err != nil {
+		ch.Close()
+		conn.Close()
+		return nil, nil, err
+	}
+
+	return conn, ch, nil
+}
+
+func PublishJudgeResult(ch *amqp.Channel, result global.JudgeResultMessage) error {
+	// 声明结果队列
+	_, err := ch.QueueDeclare(
+		"judgeResults", // 队列名称
+		true,           // 持久化
+		false,          // 自动删除
+		false,          // 排他性
+		false,          // 不等待
+		nil,            // 参数
+	)
+	if err != nil {
+		return err
+	}
+
+	body, err := json.Marshal(result)
+	if err != nil {
+		return err
+	}
+
+	return ch.Publish(
+		"",             // exchange
+		"judgeResults", // routing key
+		false,          // mandatory
+		false,
+		amqp.Publishing{
+			DeliveryMode: amqp.Persistent,
+			ContentType:  "application/json",
+			Body:         body,
+		},
+	)
 }
