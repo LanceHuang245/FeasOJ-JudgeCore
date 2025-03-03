@@ -75,8 +75,10 @@ func main() {
 	r := gin.Default()
 	router.LoadRouter(r)
 
+	// 预热容器池
 	judge.InitializeContainerPool(config.MaxSandbox)
 
+	// 启动Judge任务处理协程
 	go judge.ProcessJudgeTasks()
 
 	startServer := func(protocol, address, certFile, keyFile string) {
@@ -101,7 +103,7 @@ func main() {
 	}
 
 	// 注册JudgeCore
-	utils.RegisterService(consulClient)
+	utils.RegService(consulClient)
 
 	// 监听终端输入
 	go func() {

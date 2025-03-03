@@ -10,6 +10,8 @@ import (
 	"main/internal/utils/sql"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,19 +23,21 @@ import (
 
 // BuildImage 构建Sandbox
 func BuildImage() bool {
+	// 创建一个上下文
 	ctx := context.Background()
 
-	// 创建Docker客户端
+	// 创建一个新的Docker客户端
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
-		log.Panic(err)
+		log.Println("[FeasOJ] Error creating Docker client: ", err)
 		return false
 	}
 
 	// 将Dockerfile目录打包成tar格式
 	tar, err := archive.TarWithOptions(global.CurrentDir, &archive.TarOptions{})
 	if err != nil {
-		log.Panic(err)
+		log.Println("[FeasOJ] Error creating tar: ", err)
+		return false
 	}
 
 	// 设置镜像构建选项
@@ -47,7 +51,7 @@ func BuildImage() bool {
 	// 构建Docker镜像
 	buildResponse, err := cli.ImageBuild(ctx, tar, buildOptions)
 	if err != nil {
-		log.Panic(err)
+		log.Println("[FeasOJ] Error building Docker image: ", err)
 		return false
 	}
 	defer buildResponse.Body.Close()
@@ -120,24 +124,58 @@ func CompileAndRun(filename string, containerID string) string {
 	// 在容器内创建任务目录
 	mkdirCmd := exec.Command("docker", "exec", containerID, "mkdir", "-p", taskDir)
 	if err := mkdirCmd.Run(); err != nil {
-		return "Internal Error: cannot create task dir"
+		return "Internal Error"
 	}
 
 	// 将代码文件从挂载的workspace目录复制到任务目录中
 	copyCmd := exec.Command("docker", "exec", containerID, "cp", fmt.Sprintf("/workspace/%s", filename), taskDir)
 	if err := copyCmd.Run(); err != nil {
-		return "Internal Error: cannot copy file"
+		return "Internal Error"
 	}
 
 	// 确保任务结束后清理任务目录
 	defer func() {
 		if err := ResetContainer(containerID, taskDir); err != nil {
-			log.Printf("Reset task dir %s error: %v", taskDir, err)
+			log.Printf("[FeasOJ] Reset task dir %s error: %v", taskDir, err)
 		}
 	}()
 
 	ext := filepath.Ext(filename)
 	var compileCmd *exec.Cmd
+
+	// 解析题目ID
+	baseName := strings.TrimSuffix(filename, filepath.Ext(filename)) // 先去除扩展名
+	parts := strings.Split(baseName, "_")
+	pid, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return "Internal Error"
+	}
+
+	// 查询题目信息
+	problem := sql.SelectProblemByPid(pid)
+
+	// 解析时间限制和内存限制
+	timeLimitStr := problem.Timelimit
+	re := regexp.MustCompile(`\d+`)
+	timeMatches := re.FindAllString(timeLimitStr, -1)
+	if len(timeMatches) == 0 {
+		return "Internal Error"
+	}
+	timeLimitSeconds, err := strconv.Atoi(timeMatches[0])
+	if err != nil {
+		return "Internal Error"
+	}
+
+	memoryLimitStr := problem.Memorylimit
+	memMatches := re.FindAllString(memoryLimitStr, -1)
+	if len(memMatches) == 0 {
+		return "Internal Error"
+	}
+	memoryLimitMB, err := strconv.Atoi(memMatches[0])
+	if err != nil {
+		return "Internal Error"
+	}
+	memoryLimitKB := memoryLimitMB * 1024 // 转换为KB
 
 	switch ext {
 	case ".cpp":
@@ -162,44 +200,49 @@ func CompileAndRun(filename string, containerID string) string {
 
 	}
 
-	// 设置超时上下文用于运行测试用例
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	// 从数据库中获取输入输出样例
-	testCases := sql.SelectTestCasesByPid(strings.Split(filename, "_")[1])
+	testCases := sql.SelectTestCasesByPid(pid)
 	for _, testCase := range testCases {
-		var runCmd *exec.Cmd
+		// 每个测试用例使用独立的context，超时时间为题目限制+1秒缓冲
+		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeLimitSeconds+1)*time.Second)
+		defer cancel()
+
+		var cmdStr string
 		switch ext {
 		case ".cpp":
-			// 执行编译生成的C++可执行文件
-			runCmd = exec.CommandContext(ctx, "docker", "exec", "-i", containerID, "sh", "-c",
-				fmt.Sprintf("%s/%s.out", taskDir, filename))
-		case ".py":
-			runCmd = exec.CommandContext(ctx, "docker", "exec", "-i", containerID, "sh", "-c",
-				fmt.Sprintf("python %s/%s", taskDir, filename))
-		case ".go":
-			runCmd = exec.CommandContext(ctx, "docker", "exec", "-i", containerID, "sh", "-c",
-				fmt.Sprintf("go run %s/%s", taskDir, filename))
+			cmdStr = fmt.Sprintf("ulimit -v %d && timeout -s SIGKILL %ds %s/%s.out", memoryLimitKB, timeLimitSeconds, taskDir, filename)
 		case ".java":
-			// 运行Java程序：指定任务目录作为classpath，执行Main类
-			runCmd = exec.CommandContext(ctx, "docker", "exec", "-i", containerID, "sh", "-c",
-				fmt.Sprintf("java -cp %s Main", taskDir))
+			cmdStr = fmt.Sprintf("ulimit -v %d && timeout -s SIGKILL %ds java -cp %s Main", memoryLimitKB, timeLimitSeconds, taskDir)
+		case ".py":
+			cmdStr = fmt.Sprintf("ulimit -v %d && timeout -s SIGKILL %ds python %s/%s", memoryLimitKB, timeLimitSeconds, taskDir, filename)
+		case ".go":
+			cmdStr = fmt.Sprintf("ulimit -v %d && timeout -s SIGKILL %ds go run %s/%s", memoryLimitKB, timeLimitSeconds, taskDir, filename)
 		default:
 			return "Failed"
 		}
 
-		// 将测试用例的输入数据传入命令
+		runCmd := exec.CommandContext(ctx, "docker", "exec", "-i", containerID, "sh", "-c", cmdStr)
 		runCmd.Stdin = strings.NewReader(testCase.InputData)
 		output, err := runCmd.CombinedOutput()
+
 		if ctx.Err() == context.DeadlineExceeded {
 			return "Time Limit Exceeded"
 		}
 		if err != nil {
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				exitCode := exitErr.ExitCode()
+				switch exitCode {
+				case 124: // timeout触发
+					return "Time Limit Exceeded"
+				case 137: // SIGKILL，可能是内存超限
+					return "Memory Limit Exceeded"
+				default:
+
+				}
+			}
 			return "Failed"
 		}
-		outputStr := string(output)
-		if strings.TrimSpace(outputStr) != strings.TrimSpace(testCase.OutputData) {
+
+		if strings.TrimSpace(string(output)) != strings.TrimSpace(testCase.OutputData) {
 			return "Wrong Answer"
 		}
 	}

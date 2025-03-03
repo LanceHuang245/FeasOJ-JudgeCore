@@ -29,7 +29,6 @@ func InitializeContainerPool(n int) {
 // AcquireContainer 从池中获取一个空闲容器（若池为空则阻塞等待）
 func AcquireContainer() string {
 	containerID := <-containerPool
-	log.Printf("[FeasOJ] Acquired container %s", containerID)
 	return containerID
 }
 
@@ -64,7 +63,6 @@ func ReleaseContainer(containerID string) {
 	poolMutex.Lock()
 	containerPool <- containerID
 	poolMutex.Unlock()
-	log.Printf("[FeasOJ] Released container %s back to pool", containerID)
 }
 
 // ShutdownContainerPool 在服务关闭时终止池中所有容器

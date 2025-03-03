@@ -9,7 +9,7 @@ import (
 )
 
 // 服务注册示例
-func RegisterService(client *api.Client) {
+func RegService(client *api.Client) {
 	agent := client.Agent()
 
 	var protocol string
@@ -20,9 +20,9 @@ func RegisterService(client *api.Client) {
 	}
 
 	registration := &api.AgentServiceRegistration{
-		ID:   "JudgeCore-1",      // 服务唯一ID
-		Name: "JudgeCore",        // 服务名称
-		Port: config.ServicePort, // 服务端口
+		ID:   config.ConsulServiceID,   // 服务唯一ID
+		Name: config.ConsulServiceName, // 服务名称
+		Port: config.ServicePort,       // 服务端口
 		Tags: []string{"gin", "judge"},
 		Check: &api.AgentServiceCheck{
 			HTTP:     fmt.Sprintf("%s://%s:%d/api/v1/judgecore/health", protocol, config.ServiceAddress, config.ServicePort), // 健康检查地址
