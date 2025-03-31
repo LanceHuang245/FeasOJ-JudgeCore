@@ -1,9 +1,8 @@
 module main
 
 go 1.24.0
-
 require (
-	github.com/docker/docker v28.0.1+incompatible
+	github.com/docker/docker v28.0.4+incompatible
 	github.com/gin-gonic/gin v1.10.0
 	github.com/hashicorp/consul/api v1.31.2
 	github.com/rabbitmq/amqp091-go v1.10.0
