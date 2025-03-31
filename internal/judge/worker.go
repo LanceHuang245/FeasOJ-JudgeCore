@@ -93,6 +93,7 @@ func worker(taskChan chan Task, ch *amqp.Channel, wg *sync.WaitGroup) {
 		global.ContainerIDs.Store(task.Name, containerID)
 		// 执行编译与运行
 		result := CompileAndRun(task.Name, containerID)
+		// TODO: 读取代码保存至SQL中并删除源文件
 		// 更新判题状态
 		sql.ModifyJudgeStatus(task.UID, task.PID, result)
 
