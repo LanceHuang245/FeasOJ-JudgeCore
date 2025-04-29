@@ -103,7 +103,10 @@ func main() {
 	}
 
 	// 注册JudgeCore
-	utils.RegService(consulClient)
+	err = utils.RegService(consulClient)
+	if err != nil {
+		return
+	}
 
 	// 监听终端输入
 	go func() {

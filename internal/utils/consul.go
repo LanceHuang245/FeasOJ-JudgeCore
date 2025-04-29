@@ -9,7 +9,7 @@ import (
 )
 
 // 服务注册示例
-func RegService(client *api.Client) {
+func RegService(client *api.Client) error {
 	agent := client.Agent()
 
 	var protocol string
@@ -34,6 +34,8 @@ func RegService(client *api.Client) {
 	err := agent.ServiceRegister(registration)
 	if err != nil {
 		log.Println("[FeasOJ] JudgeCore service registration failed:", err)
+		return err
 	}
 	log.Println("[FeasOJ] JudgeCore service registered successfully")
+	return nil
 }
