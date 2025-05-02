@@ -1,5 +1,8 @@
 FROM alpine:latest
 
+# 替换为中国国内镜像源(If you are not in China mainland, annotate it)
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
+
 # 更新包列表并安装必要的软件
 RUN apk update && apk add --no-cache \
     build-base \
@@ -8,7 +11,9 @@ RUN apk update && apk add --no-cache \
     openjdk17 \
     go \
     python3 \
-    py3-pip
+    py3-pip \
+    rust \
+    cargo
 
 # 设置工作目录
 WORKDIR /workspace

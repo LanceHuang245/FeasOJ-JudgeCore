@@ -6,6 +6,7 @@ require (
 	github.com/docker/docker v28.1.1+incompatible
 	github.com/gin-gonic/gin v1.10.0
 	github.com/hashicorp/consul/api v1.32.0
+	github.com/moby/go-archive v0.1.0
 	github.com/rabbitmq/amqp091-go v1.10.0
 	gorm.io/driver/mysql v1.5.7
 	gorm.io/gorm v1.26.0
@@ -55,7 +56,6 @@ require (
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/moby/docker-image-spec v1.3.1 // indirect
-	github.com/moby/go-archive v0.1.0 // indirect
 	github.com/moby/patternmatcher v0.6.0 // indirect
 	github.com/moby/sys/sequential v0.6.0 // indirect
 	github.com/moby/sys/user v0.4.0 // indirect

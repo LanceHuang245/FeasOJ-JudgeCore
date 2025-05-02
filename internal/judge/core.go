@@ -18,7 +18,7 @@ import (
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
-	"github.com/docker/docker/pkg/archive"
+	"github.com/moby/go-archive"
 )
 
 // BuildImage 构建Sandbox
@@ -181,9 +181,6 @@ func CompileAndRun(filename string, containerID string) string {
 	case ".cpp":
 		compileCmd = exec.Command("docker", "exec", containerID, "sh", "-c",
 			fmt.Sprintf("g++ %s/%s -o %s/%s.out", taskDir, filename, taskDir, filename))
-		if err := compileCmd.Run(); err != nil {
-			return "Compile Failed"
-		}
 	case ".java":
 		renameCmd := exec.Command("docker", "exec", containerID, "sh", "-c",
 			fmt.Sprintf("mv %s/%s %s/Main.java", taskDir, filename, taskDir))
@@ -193,11 +190,18 @@ func CompileAndRun(filename string, containerID string) string {
 		// 编译Java代码
 		compileCmd = exec.Command("docker", "exec", containerID, "sh", "-c",
 			fmt.Sprintf("javac %s/Main.java", taskDir))
+	case ".rs":
+		exeName := strings.TrimSuffix(filename, ".rs")
+		compileCmd = exec.Command("docker", "exec", containerID, "sh", "-c",
+			fmt.Sprintf("rustc %s/%s -o %s/%s", taskDir, filename, taskDir, exeName))
+	default:
+
+	}
+
+	if compileCmd != nil {
 		if err := compileCmd.Run(); err != nil {
 			return "Compile Failed"
 		}
-	default:
-
 	}
 
 	testCases := sql.SelectTestCasesByPid(pid)
@@ -216,6 +220,10 @@ func CompileAndRun(filename string, containerID string) string {
 			cmdStr = fmt.Sprintf("ulimit -v %d && timeout -s SIGKILL %ds python %s/%s", memoryLimitKB, timeLimitSeconds, taskDir, filename)
 		case ".go":
 			cmdStr = fmt.Sprintf("ulimit -v %d && timeout -s SIGKILL %ds go run %s/%s", memoryLimitKB, timeLimitSeconds, taskDir, filename)
+		case ".rs":
+			exeName := strings.TrimSuffix(filename, ".rs")
+			cmdStr = fmt.Sprintf("ulimit -v %d && timeout -s SIGKILL %ds %s/%s",
+				memoryLimitKB, timeLimitSeconds, taskDir, exeName)
 		default:
 			return "Failed"
 		}
