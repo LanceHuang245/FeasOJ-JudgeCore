@@ -2,6 +2,7 @@ package judge
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -194,6 +195,14 @@ func CompileAndRun(filename string, containerID string) string {
 		exeName := strings.TrimSuffix(filename, ".rs")
 		compileCmd = exec.Command("docker", "exec", containerID, "sh", "-c",
 			fmt.Sprintf("rustc %s/%s -o %s/%s", taskDir, filename, taskDir, exeName))
+	case ".php":
+		compileCmd = exec.Command("docker", "exec", containerID, "sh", "-c",
+			fmt.Sprintf("php -l %s/%s", taskDir, filename))
+	case ".pas":
+		// FPC编译Pas
+		exeName := strings.TrimSuffix(filename, ".pas")
+		compileCmd = exec.Command("docker", "exec", containerID, "sh", "-c",
+			fmt.Sprintf("fpc -v0 -O2 %s/%s -o%s/%s", taskDir, filename, taskDir, exeName))
 	default:
 
 	}
@@ -224,6 +233,13 @@ func CompileAndRun(filename string, containerID string) string {
 			exeName := strings.TrimSuffix(filename, ".rs")
 			cmdStr = fmt.Sprintf("ulimit -v %d && timeout -s SIGKILL %ds %s/%s",
 				memoryLimitKB, timeLimitSeconds, taskDir, exeName)
+		case ".php":
+			cmdStr = fmt.Sprintf("ulimit -v %d && timeout -s SIGKILL %ds php %s/%s",
+				memoryLimitKB, timeLimitSeconds, taskDir, filename)
+		case ".pas":
+			exeName := strings.TrimSuffix(filename, ".pas")
+			cmdStr = fmt.Sprintf("ulimit -v %d && timeout -s SIGKILL %ds %s/%s",
+				memoryLimitKB, timeLimitSeconds, taskDir, exeName)
 		default:
 			return "Failed"
 		}
@@ -232,11 +248,12 @@ func CompileAndRun(filename string, containerID string) string {
 		runCmd.Stdin = strings.NewReader(testCase.InputData)
 		output, err := runCmd.CombinedOutput()
 
-		if ctx.Err() == context.DeadlineExceeded {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return "Time Limit Exceeded"
 		}
 		if err != nil {
-			if exitErr, ok := err.(*exec.ExitError); ok {
+			var exitErr *exec.ExitError
+			if errors.As(err, &exitErr) {
 				exitCode := exitErr.ExitCode()
 				switch exitCode {
 				case 124: // timeout触发
