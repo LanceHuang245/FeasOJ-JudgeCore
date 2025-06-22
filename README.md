@@ -12,7 +12,7 @@ FeasOJ is an online programming practice platform based on Vue and Golang, suppo
 [API Document(EN)](https://claret-feasoj.apifox.cn/en/)
 
 ### Environment
-- Golang 1.24.0
+- Golang 1.24.4
 - Docker Latest
 - MySQL
 - RabbitMQ

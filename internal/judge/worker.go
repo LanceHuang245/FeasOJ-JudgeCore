@@ -37,7 +37,7 @@ func ProcessJudgeTasks() {
 	var wg sync.WaitGroup
 
 	// 创建多个 worker 协程
-	for range config.MaxSandbox {
+	for range config.GetMaxSandbox() {
 		wg.Add(1)
 		go worker(taskChan, ch, &wg)
 	}

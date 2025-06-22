@@ -85,7 +85,11 @@ func StartContainer() (string, error) {
 
 	// 配置主机配置
 	hostConfig := &container.HostConfig{
-		Resources: config.SandBoxConfig,
+		Resources: container.Resources{
+			Memory:    config.GetSandboxMemory(),
+			NanoCPUs:  int64(config.GetSandboxNanoCPUs() * 1e9),
+			CPUShares: config.GetSandboxCPUShares(),
+		},
 		Binds: []string{
 			global.CodeDir + ":/workspace", // 挂载文件夹
 		},
@@ -220,15 +224,14 @@ func CompileAndRun(filename string, containerID string) string {
 		defer cancel()
 
 		var cmdStr string
+		// TODO: Java的内存限制需要调整修复
 		switch ext {
 		case ".cpp":
 			cmdStr = fmt.Sprintf("ulimit -v %d && timeout -s SIGKILL %ds %s/%s.out", memoryLimitKB, timeLimitSeconds, taskDir, filename)
 		case ".java":
-			cmdStr = fmt.Sprintf("ulimit -v %d && timeout -s SIGKILL %ds java -cp %s Main", memoryLimitKB, timeLimitSeconds, taskDir)
+			cmdStr = fmt.Sprintf("timeout -s SIGKILL %ds java -cp %s Main", timeLimitSeconds, taskDir)
 		case ".py":
 			cmdStr = fmt.Sprintf("ulimit -v %d && timeout -s SIGKILL %ds python %s/%s", memoryLimitKB, timeLimitSeconds, taskDir, filename)
-		case ".go":
-			cmdStr = fmt.Sprintf("ulimit -v %d && timeout -s SIGKILL %ds go run %s/%s", memoryLimitKB, timeLimitSeconds, taskDir, filename)
 		case ".rs":
 			exeName := strings.TrimSuffix(filename, ".rs")
 			cmdStr = fmt.Sprintf("ulimit -v %d && timeout -s SIGKILL %ds %s/%s",
@@ -248,9 +251,10 @@ func CompileAndRun(filename string, containerID string) string {
 		runCmd.Stdin = strings.NewReader(testCase.InputData)
 		output, err := runCmd.CombinedOutput()
 
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		if ctx.Err() == context.DeadlineExceeded {
 			return "Time Limit Exceeded"
 		}
+
 		if err != nil {
 			var exitErr *exec.ExitError
 			if errors.As(err, &exitErr) {
@@ -267,12 +271,16 @@ func CompileAndRun(filename string, containerID string) string {
 			return "Failed"
 		}
 
-		if strings.TrimSpace(string(output)) != strings.TrimSpace(testCase.OutputData) {
+		// 添加调试信息
+		expectedOutput := strings.TrimSpace(testCase.OutputData)
+		actualOutput := strings.TrimSpace(string(output))
+
+		if actualOutput != expectedOutput {
 			return "Wrong Answer"
 		}
 	}
 
-	return "Success"
+	return "Accepted"
 }
 
 // TerminateContainer 终止并删除Docker容器

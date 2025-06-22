@@ -25,7 +25,6 @@ func main() {
 	// 定义目录映射
 	dirs := map[string]*string{
 		"certificate": &global.CertDir,
-		"configs":     &global.ConfigDir,
 		"codefiles":   &global.CodeDir,
 		"logs":        &global.LogDir,
 	}
@@ -55,7 +54,7 @@ func main() {
 	log.Println("[FeasOJ] MySQL initialization complete")
 
 	consulConfig := api.DefaultConfig()
-	consulConfig.Address = config.ConsulAddress
+	consulConfig.Address = config.GetConsulAddress()
 	log.Println("[FeasOJ] Connecting to Consul...")
 	consulClient, err := api.NewClient(consulConfig)
 	if err != nil {
@@ -76,7 +75,7 @@ func main() {
 	router.LoadRouter(r)
 
 	// 预热容器池
-	judge.InitializeContainerPool(config.MaxSandbox)
+	judge.InitializeContainerPool(config.GetMaxSandbox())
 
 	// 启动Judge任务处理协程
 	go judge.ProcessJudgeTasks()
@@ -96,10 +95,10 @@ func main() {
 		}
 	}
 
-	if config.EnableHTTPS {
-		go startServer("https", fmt.Sprintf("%s:%d", config.ServiceAddress, config.ServicePort), config.ServerCertPath, config.ServerKeyPath)
+	if config.IsHTTPSEnabled() {
+		go startServer("https", fmt.Sprintf("%s:%d", config.GetServiceAddress(), config.GetServicePort()), config.GetServerCertPath(), config.GetServerKeyPath())
 	} else {
-		go startServer("http", fmt.Sprintf("%s:%d", config.ServiceAddress, config.ServicePort), "", "")
+		go startServer("http", fmt.Sprintf("%s:%d", config.GetServiceAddress(), config.GetServicePort()), "", "")
 	}
 
 	// 注册JudgeCore

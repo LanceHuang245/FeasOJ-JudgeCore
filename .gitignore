@@ -1,5 +1,27 @@
+# Ignore all files in the following directories
 /pkg
 /certificate
 /codefiles
 /logs
-/configs
+
+# Ignore config.json
+config.json
+
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+# Dependency directories (remove any existing configs line)
+# /configs
+
+# Go workspace file
+go.work

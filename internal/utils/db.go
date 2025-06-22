@@ -11,20 +11,26 @@ import (
 
 // 返回数据库连接对象
 func ConnectSql() *gorm.DB {
-	dsn := config.LoadSqlConfig()
-	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
-	if err != nil {
-		log.Println("[FeasOJ] Database connection failed, please go to config.xml manually to configure.")
-		return nil
-	}
-	sqlDB, err := db.DB()
-	if err != nil {
-		log.Println("[FeasOJ] Failed to get generic database object.")
+	dsn := config.GetDatabaseDSN()
+	if dsn == "" {
+		log.Println("[FeasOJ] Database connection string is empty, please check config file")
 		return nil
 	}
 
-	sqlDB.SetMaxIdleConns(config.MaxIdleConns)
-	sqlDB.SetMaxOpenConns(config.MaxOpenConns)
-	sqlDB.SetConnMaxLifetime(config.MaxLifeTime * time.Second)
+	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	if err != nil {
+		log.Println("[FeasOJ] Database connection failed, please check database config in config.json")
+		return nil
+	}
+
+	sqlDB, err := db.DB()
+	if err != nil {
+		log.Println("[FeasOJ] Failed to get database object")
+		return nil
+	}
+
+	sqlDB.SetMaxIdleConns(config.GetMaxIdleConns())
+	sqlDB.SetMaxOpenConns(config.GetMaxOpenConns())
+	sqlDB.SetConnMaxLifetime(time.Duration(config.GetMaxLifeTime()) * time.Second)
 	return db
 }

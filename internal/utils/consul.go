@@ -13,19 +13,19 @@ func RegService(client *api.Client) error {
 	agent := client.Agent()
 
 	var protocol string
-	if config.EnableHTTPS {
+	if config.IsHTTPSEnabled() {
 		protocol = "https"
 	} else {
 		protocol = "http"
 	}
 
 	registration := &api.AgentServiceRegistration{
-		ID:   config.ConsulServiceID,   // 服务唯一ID
-		Name: config.ConsulServiceName, // 服务名称
-		Port: config.ServicePort,       // 服务端口
+		ID:   config.GetConsulServiceID(),   // 服务唯一ID
+		Name: config.GetConsulServiceName(), // 服务名称
+		Port: config.GetServicePort(),       // 服务端口
 		Tags: []string{"gin", "judge"},
 		Check: &api.AgentServiceCheck{
-			HTTP:     fmt.Sprintf("%s://%s:%d/api/v1/judgecore/health", protocol, config.ServiceAddress, config.ServicePort), // 健康检查地址
+			HTTP:     fmt.Sprintf("%s://%s:%d/api/v1/judgecore/health", protocol, config.GetServiceAddress(), config.GetServicePort()), // 健康检查地址
 			Interval: "60s",
 			Timeout:  "6s",
 		},
