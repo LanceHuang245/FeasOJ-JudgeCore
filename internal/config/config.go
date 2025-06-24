@@ -165,9 +165,6 @@ func GetConsulServiceID() string {
 
 // 获取RabbitMQ地址
 func GetRabbitMQAddress() string {
-	if global.AppConfigInstance == nil {
-		return "amqp://rabbitmq:Sing5200@zhangzhou.claret.space:5672/"
-	}
 	return global.AppConfigInstance.RabbitMQ.Address
 }
 
