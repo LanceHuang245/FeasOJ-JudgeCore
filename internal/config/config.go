@@ -1,10 +1,10 @@
 package config
 
 import (
+	"JudgeCore/internal/global"
 	"encoding/json"
 	"fmt"
 	"log"
-	"main/internal/global"
 	"os"
 	"path/filepath"
 )

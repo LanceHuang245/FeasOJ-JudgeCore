@@ -1,14 +1,14 @@
 package judge
 
 import (
+	"JudgeCore/internal/config"
+	"JudgeCore/internal/global"
+	"JudgeCore/internal/utils/sql"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"log"
-	"main/internal/config"
-	"main/internal/global"
-	"main/internal/utils/sql"
 	"os/exec"
 	"path/filepath"
 	"regexp"

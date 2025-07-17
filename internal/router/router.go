@@ -1,8 +1,8 @@
 package router
 
 import (
-	gincontext "main/internal/gin_context"
-	"main/internal/middlewares"
+	gincontext "JudgeCore/internal/gin_context"
+	"JudgeCore/internal/middlewares"
 
 	"github.com/gin-gonic/gin"
 )

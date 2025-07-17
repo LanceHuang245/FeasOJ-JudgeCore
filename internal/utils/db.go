@@ -1,8 +1,8 @@
 package utils
 
 import (
+	"JudgeCore/internal/config"
 	"log"
-	"main/internal/config"
 	"time"
 
 	"gorm.io/driver/mysql"

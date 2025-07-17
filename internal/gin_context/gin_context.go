@@ -1,7 +1,7 @@
 package gincontext
 
 import (
-	"main/internal/global"
+	"JudgeCore/internal/global"
 	"net/http"
 	"path/filepath"
 

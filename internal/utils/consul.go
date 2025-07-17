@@ -1,9 +1,9 @@
 package utils
 
 import (
+	"JudgeCore/internal/config"
 	"fmt"
 	"log"
-	"main/internal/config"
 
 	"github.com/hashicorp/consul/api"
 )

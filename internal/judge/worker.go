@@ -1,11 +1,11 @@
 package judge
 
 import (
+	"JudgeCore/internal/config"
+	"JudgeCore/internal/global"
+	"JudgeCore/internal/utils"
+	"JudgeCore/internal/utils/sql"
 	"log"
-	"main/internal/config"
-	"main/internal/global"
-	"main/internal/utils"
-	"main/internal/utils/sql"
 	"strconv"
 	"strings"
 	"sync"

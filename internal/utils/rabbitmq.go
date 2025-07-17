@@ -1,9 +1,9 @@
 package utils
 
 import (
+	"JudgeCore/internal/config"
+	"JudgeCore/internal/global"
 	"encoding/json"
-	"main/internal/config"
-	"main/internal/global"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )

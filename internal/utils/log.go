@@ -1,9 +1,9 @@
 package utils
 
 import (
+	"JudgeCore/internal/global"
 	"io"
 	"log"
-	"main/internal/global"
 	"os"
 	"path/filepath"
 	"time"

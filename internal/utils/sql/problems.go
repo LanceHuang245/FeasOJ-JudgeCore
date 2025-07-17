@@ -1,8 +1,8 @@
 package sql
 
 import (
-	"main/internal/global"
-	"main/internal/utils"
+	"JudgeCore/internal/global"
+	"JudgeCore/internal/utils"
 )
 
 // 获取指定题目的测试样例

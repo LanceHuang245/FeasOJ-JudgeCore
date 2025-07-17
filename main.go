@@ -1,14 +1,14 @@
 package main
 
 import (
+	"JudgeCore/internal/config"
+	"JudgeCore/internal/global"
+	"JudgeCore/internal/judge"
+	"JudgeCore/internal/router"
+	"JudgeCore/internal/utils"
 	"bufio"
 	"fmt"
 	"log"
-	"main/internal/config"
-	"main/internal/global"
-	"main/internal/judge"
-	"main/internal/router"
-	"main/internal/utils"
 	"os"
 	"os/signal"
 	"path/filepath"
