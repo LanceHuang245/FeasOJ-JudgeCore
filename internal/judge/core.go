@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/build"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 	"github.com/moby/go-archive"
@@ -24,7 +24,6 @@ import (
 
 // BuildImage 构建Sandbox
 func BuildImage() bool {
-	// 创建一个上下文
 	ctx := context.Background()
 
 	// 创建一个新的Docker客户端
@@ -42,7 +41,7 @@ func BuildImage() bool {
 	}
 
 	// 设置镜像构建选项
-	buildOptions := types.ImageBuildOptions{
+	buildOptions := build.ImageBuildOptions{
 		Context:    tar,                          // 构建上下文
 		Dockerfile: "Sandbox",                    // Dockerfile文件名
 		Tags:       []string{"judgecore:latest"}, // 镜像标签
@@ -149,7 +148,7 @@ func CompileAndRun(filename string, containerID string) string {
 	var compileCmd *exec.Cmd
 
 	// 解析题目ID
-	baseName := strings.TrimSuffix(filename, filepath.Ext(filename)) // 先去除扩展名
+	baseName := strings.TrimSuffix(filename, filepath.Ext(filename)) // 去除扩展名
 	parts := strings.Split(baseName, "_")
 	pid, err := strconv.Atoi(parts[1])
 	if err != nil {
@@ -224,12 +223,17 @@ func CompileAndRun(filename string, containerID string) string {
 		defer cancel()
 
 		var cmdStr string
-		// TODO: Java的内存限制需要调整修复
+		// TODO: Java的内存限制需要进行测试并找到最优方案
 		switch ext {
 		case ".cpp":
 			cmdStr = fmt.Sprintf("ulimit -v %d && timeout -s SIGKILL %ds %s/%s.out", memoryLimitKB, timeLimitSeconds, taskDir, filename)
 		case ".java":
-			cmdStr = fmt.Sprintf("timeout -s SIGKILL %ds java -cp %s Main", timeLimitSeconds, taskDir)
+			heapSizeMB := max(memoryLimitKB/1024, 32)
+			// 设定最大堆、初始堆、最大总内存比例
+			cmdStr = fmt.Sprintf(
+				"ulimit -v %d && timeout -s SIGKILL %ds java -cp %s -Xms%dm -Xmx%dm -XX:MaxRAMPercentage=80.0 Main",
+				memoryLimitKB, timeLimitSeconds, taskDir, heapSizeMB, heapSizeMB,
+			)
 		case ".py":
 			cmdStr = fmt.Sprintf("ulimit -v %d && timeout -s SIGKILL %ds python %s/%s", memoryLimitKB, timeLimitSeconds, taskDir, filename)
 		case ".rs":

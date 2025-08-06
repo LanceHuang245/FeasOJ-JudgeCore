@@ -61,9 +61,9 @@ func PublishJudgeResult(ch *amqp.Channel, result global.JudgeResultMessage) erro
 	}
 
 	return ch.Publish(
-		"",             // exchange
-		"judgeResults", // routing key
-		false,          // mandatory
+		"",
+		"judgeResults",
+		false,
 		false,
 		amqp.Publishing{
 			DeliveryMode: amqp.Persistent,

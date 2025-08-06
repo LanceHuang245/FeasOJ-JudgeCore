@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -21,13 +22,21 @@ type Task struct {
 
 // ProcessJudgeTasks 函数用于处理判题任务
 func ProcessJudgeTasks() {
-	// 连接到 RabbitMQ
-	conn, ch, err := utils.ConnectRabbitMQ()
-	if err != nil {
-		log.Println("[FeasOJ] RabbitMQ connect error: ", err)
-		return
+	var conn *amqp.Connection
+	var ch *amqp.Channel
+	var err error
+
+	// 若断开则自动重连
+	for {
+		conn, ch, err = utils.ConnectRabbitMQ()
+		if err != nil {
+			log.Println("[FeasOJ] RabbitMQ connect error, retrying in 3s: ", err)
+			time.Sleep(3 * time.Second)
+			continue
+		}
+		log.Println("[FeasOJ] RabbitMQ connected")
+		break
 	}
-	log.Println("[FeasOJ] RabbitMQ connected")
 	defer conn.Close()
 	defer ch.Close()
 
@@ -42,39 +51,56 @@ func ProcessJudgeTasks() {
 		go worker(taskChan, ch, &wg)
 	}
 
-	// 获取队列中的任务
-	msgs, err := ch.Consume(
-		"judgeTask", // 队列名称
-		"",          // 消费者标签
-		true,        // 自动应答
-		false,       // 是否排他
-		false,       // 是否持久化
-		false,       // 是否等待
-		nil,         // 额外参数
-	)
-	if err != nil {
-		log.Panic("[FeasOJ] Failed to start consuming: ", err)
-	}
-
-	// 无限循环处理任务
-	for msg := range msgs {
-		taskData := string(msg.Body)
-		// 将任务分割成用户ID和题目ID
-		parts := strings.Split(taskData, "_")
-		uid := parts[0]
-		pid := strings.Split(parts[1], ".")[0]
-		// 将用户ID和题目ID转换为整数
-		uidInt, err := strconv.Atoi(uid)
+	for {
+		// 获取队列中的任务
+		msgs, err := ch.Consume(
+			"judgeTask", // 队列名称
+			"",          // 消费者标签
+			true,        // 自动应答
+			false,       // 是否排他
+			false,       // 是否持久化
+			false,       // 是否等待
+			nil,         // 额外参数
+		)
 		if err != nil {
-			log.Panic(err)
-		}
-		pidInt, err := strconv.Atoi(pid)
-		if err != nil {
-			log.Panic(err)
+			log.Println("[FeasOJ] Failed to start consuming, retrying in 3s: ", err)
+			time.Sleep(3 * time.Second)
+			// 重新连接
+			conn.Close()
+			ch.Close()
+			for {
+				conn, ch, err = utils.ConnectRabbitMQ()
+				if err != nil {
+					log.Println("[FeasOJ] RabbitMQ reconnect error, retrying in 3s: ", err)
+					time.Sleep(3 * time.Second)
+					continue
+				}
+				break
+			}
+			continue
 		}
 
-		// 将任务发送到任务通道
-		taskChan <- Task{UID: uidInt, PID: pidInt, Name: taskData}
+		// 无限循环处理任务
+		for msg := range msgs {
+			taskData := string(msg.Body)
+			// 将任务分割成用户ID和题目ID
+			parts := strings.Split(taskData, "_")
+			uid := parts[0]
+			pid := strings.Split(parts[1], ".")[0]
+			// 将用户ID和题目ID转换为整数
+			uidInt, err := strconv.Atoi(uid)
+			if err != nil {
+				log.Panic(err)
+			}
+			pidInt, err := strconv.Atoi(pid)
+			if err != nil {
+				log.Panic(err)
+			}
+
+			// 将任务发送到任务通道
+			taskChan <- Task{UID: uidInt, PID: pidInt, Name: taskData}
+		}
+		break
 	}
 
 	// 等待所有 worker 完成
