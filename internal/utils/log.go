@@ -1,7 +1,6 @@
 package utils
 
 import (
-	"JudgeCore/internal/global"
 	"io"
 	"log"
 	"os"
@@ -9,15 +8,14 @@ import (
 	"time"
 )
 
-// 初始化日志模块
-func InitializeLogger() (*os.File, error) {
-	// 确保日志目录存在
-	if err := os.MkdirAll(global.LogDir, os.ModePerm); err != nil {
+// InitializeLogger 初始化日志模块
+func InitializeLogger(logDir string) (*os.File, error) {
+	if err := os.MkdirAll(logDir, os.ModePerm); err != nil {
 		return nil, err
 	}
 
 	currentTime := time.Now().Format("2006-01-02_15-04-05")
-	logFileName := filepath.Join(global.LogDir, currentTime+".txt")
+	logFileName := filepath.Join(logDir, currentTime+".txt")
 	logFile, err := os.OpenFile(logFileName, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 	if err != nil {
 		return nil, err
@@ -29,7 +27,7 @@ func InitializeLogger() (*os.File, error) {
 	return logFile, nil
 }
 
-// 关闭日志模块
+// CloseLogger 关闭日志模块
 func CloseLogger(logFile *os.File) {
 	if logFile != nil {
 		logFile.Close()

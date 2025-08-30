@@ -2,10 +2,9 @@ package main
 
 import (
 	"JudgeCore/internal/config"
-	"JudgeCore/internal/global"
 	"JudgeCore/internal/judge"
-	"JudgeCore/internal/router"
 	"JudgeCore/internal/utils"
+	"JudgeCore/server"
 	"bufio"
 	"fmt"
 	"log"
@@ -19,112 +18,112 @@ import (
 )
 
 func main() {
-	global.CurrentDir, _ = os.Getwd()
-	global.ParentDir = filepath.Dir(global.CurrentDir)
-
-	// 定义目录映射
-	dirs := map[string]*string{
-		"certificate": &global.CertDir,
-		"codefiles":   &global.CodeDir,
-		"logs":        &global.LogDir,
+	currentDir, err := os.Getwd()
+	if err != nil {
+		log.Fatalf("[FeasOJ] Failed to get current directory: %v", err)
 	}
 
-	// 遍历map，设置路径并创建不存在的目录
-	for name, dir := range dirs {
-		*dir = filepath.Join(global.CurrentDir, name)
-		if _, err := os.Stat(*dir); os.IsNotExist(err) {
-			os.Mkdir(*dir, os.ModePerm)
+	// 定义并创建必要的目录
+	logDir := filepath.Join(currentDir, "logs")
+	codeDir := filepath.Join(currentDir, "codefiles")
+
+	certDir := filepath.Join(currentDir, "certificate")
+	for _, dir := range []string{logDir, codeDir, certDir} {
+		if _, err := os.Stat(dir); os.IsNotExist(err) {
+			os.Mkdir(dir, os.ModePerm)
 		}
 	}
 
 	// 初始化Logger
-	logFile, err := utils.InitializeLogger()
+	logFile, err := utils.InitializeLogger(logDir)
 	if err != nil {
 		log.Fatalf("[FeasOJ] Failed to initialize logger: %v", err)
 	}
 	defer utils.CloseLogger(logFile)
 
-	// 初始化配置
-	config.InitConfig()
+	// 加载配置
+	cfg, err := config.LoadConfig(currentDir)
+	if err != nil {
+		log.Fatalf("[FeasOJ] Failed to load config: %v", err)
+	}
 
 	// 初始化数据库
-	if utils.ConnectSql() == nil {
-		return
+	db, err := utils.ConnectSql(cfg.Database)
+	if err != nil {
+		log.Fatalf("[FeasOJ] MySQL initialization failed: %v", err)
 	}
 	log.Println("[FeasOJ] MySQL initialization complete")
 
+	// 初始化Consul客户端
 	consulConfig := api.DefaultConfig()
-	consulConfig.Address = config.GetConsulAddress()
+	consulConfig.Address = cfg.Consul.Address
 	log.Println("[FeasOJ] Connecting to Consul...")
 	consulClient, err := api.NewClient(consulConfig)
 	if err != nil {
-		log.Println("[FeasOJ] Error connecting to Consul: ", err)
-		return
+		log.Fatalf("[FeasOJ] Error connecting to Consul: %v", err)
 	}
 
 	// 构建沙盒镜像
-	if judge.BuildImage() {
-		log.Println("[FeasOJ] SandBox builds successfully")
-	} else {
-		log.Println("[FeasOJ] SandBox builds fail, please make sure Docker is running and up to date")
-		return
+	if !judge.BuildImage(currentDir) {
+		log.Fatalf("[FeasOJ] SandBox builds fail, please make sure Docker is running and up to date")
 	}
+	log.Println("[FeasOJ] SandBox builds successfully")
+
+	// 初始化并预热容器池
+	judgePool := judge.NewJudgePool(cfg.Sandbox, codeDir)
+	judgePool.Initialize(cfg.Sandbox.MaxConcurrent)
+
+	// 启动Judge任务处理协程
+	go judge.ProcessJudgeTasks(cfg.RabbitMQ, db, judgePool)
 
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
-	router.LoadRouter(r)
+	server.LoadRouter(r, db, judgePool, codeDir)
 
-	// 预热容器池
-	judge.InitializeContainerPool(config.GetMaxSandbox())
-
-	// 启动Judge任务处理协程
-	go judge.ProcessJudgeTasks()
-
-	startServer := func(protocol, address, certFile, keyFile string) {
-		for {
-			var err error
-			if protocol == "http" {
-				err = r.Run(address)
-			} else {
-				err = r.RunTLS(address, certFile, keyFile)
-			}
-			if err != nil {
-				log.Printf("[FeasOJ] Server start error: %v\n", err)
-				os.Exit(0)
-			}
+	go func() {
+		serverAddr := fmt.Sprintf("%s:%d", cfg.Server.Address, cfg.Server.Port)
+		var err error
+		if cfg.Server.EnableHTTPS {
+			certPath := filepath.Join(certDir, filepath.Base(cfg.Server.CertPath))
+			keyPath := filepath.Join(certDir, filepath.Base(cfg.Server.KeyPath))
+			err = r.RunTLS(serverAddr, certPath, keyPath)
+		} else {
+			err = r.Run(serverAddr)
 		}
+		if err != nil {
+			log.Fatalf("[FeasOJ] Server start error: %v\n", err)
+		}
+	}()
+
+	// 注册服务
+	if err := utils.RegService(consulClient, cfg.Consul, cfg.Server); err != nil {
+		log.Fatalf("[FeasOJ] Failed to register service with Consul: %v", err)
 	}
 
-	if config.IsHTTPSEnabled() {
-		go startServer("https", fmt.Sprintf("%s:%d", config.GetServiceAddress(), config.GetServicePort()), config.GetServerCertPath(), config.GetServerKeyPath())
-	} else {
-		go startServer("http", fmt.Sprintf("%s:%d", config.GetServiceAddress(), config.GetServicePort()), "", "")
-	}
+	// 优雅地关闭
+	gracefulShutdown(logFile, judgePool)
+}
 
-	// 注册JudgeCore
-	err = utils.RegService(consulClient)
-	if err != nil {
-		return
-	}
+func gracefulShutdown(logFile *os.File, pool *judge.JudgePool) {
+	// 监听终端输入或中断信号
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
-	// 监听终端输入
 	go func() {
 		scanner := bufio.NewScanner(os.Stdin)
 		for scanner.Scan() {
 			if scanner.Text() == "exit" || scanner.Text() == "EXIT" {
-				log.Println("[FeasOJ] The server is being shut down, please be patient to wait for the container to be closed")
-				os.Exit(0)
+				close(quit)
+				return
 			}
 		}
 	}()
 
-	// 等待中断信号关闭服务器
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	log.Println("[FeasOJ] Input 'exit' or Ctrl+C to stop the server")
 	<-quit
 
 	log.Println("[FeasOJ] The server is shutting down, please be patient to wait for the container to be closed")
-	judge.ShutdownContainerPool()
+	pool.Shutdown()
 	utils.CloseLogger(logFile)
+	os.Exit(0)
 }

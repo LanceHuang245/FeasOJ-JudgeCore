@@ -8,24 +8,22 @@ import (
 	"github.com/hashicorp/consul/api"
 )
 
-// 服务注册示例
-func RegService(client *api.Client) error {
+// RegService 服务注册
+func RegService(client *api.Client, consulConfig config.Consul, serverConfig config.Server) error {
 	agent := client.Agent()
 
-	var protocol string
-	if config.IsHTTPSEnabled() {
+	protocol := "http"
+	if serverConfig.EnableHTTPS {
 		protocol = "https"
-	} else {
-		protocol = "http"
 	}
 
 	registration := &api.AgentServiceRegistration{
-		ID:   config.GetConsulServiceID(),   // 服务唯一ID
-		Name: config.GetConsulServiceName(), // 服务名称
-		Port: config.GetServicePort(),       // 服务端口
+		ID:   consulConfig.ServiceID,   // 服务唯一ID
+		Name: consulConfig.ServiceName, // 服务名称
+		Port: serverConfig.Port,        // 服务端口
 		Tags: []string{"gin", "judge"},
 		Check: &api.AgentServiceCheck{
-			HTTP:     fmt.Sprintf("%s://%s:%d/api/v1/judgecore/health", protocol, config.GetServiceAddress(), config.GetServicePort()), // 健康检查地址
+			HTTP:     fmt.Sprintf("%s://%s:%d/api/v1/judgecore/health", protocol, serverConfig.Address, serverConfig.Port), // 健康检查地址
 			Interval: "60s",
 			Timeout:  "6s",
 		},

@@ -6,49 +6,6 @@ type TestCaseRequest struct {
 	OutputData string `json:"output"`
 }
 
-// JSON配置文件结构体
-type AppConfig struct {
-	// Consul配置
-	Consul struct {
-		Address     string `json:"address"`
-		ServiceName string `json:"service_name"`
-		ServiceID   string `json:"service_id"`
-	} `json:"consul"`
-
-	// RabbitMQ配置
-	RabbitMQ struct {
-		Address string `json:"address"`
-	} `json:"rabbitmq"`
-
-	// 服务器配置
-	Server struct {
-		Address     string `json:"address"`
-		Port        int    `json:"port"`
-		EnableHTTPS bool   `json:"enable_https"`
-		CertPath    string `json:"cert_path"`
-		KeyPath     string `json:"key_path"`
-	} `json:"server"`
-
-	// Docker沙盒配置
-	Sandbox struct {
-		Memory        int64   `json:"memory"`         // 内存限制 (字节)
-		NanoCPUs      float64 `json:"nano_cpus"`      // CPU限制 (核心数)
-		CPUShares     int64   `json:"cpu_shares"`     // CPU权重
-		MaxConcurrent int     `json:"max_concurrent"` // 最大并发数
-	} `json:"sandbox"`
-
-	// MySQL配置
-	Database struct {
-		Address      string `json:"address"`
-		Name         string `json:"name"`
-		User         string `json:"user"`
-		Password     string `json:"password"`
-		MaxOpenConns int    `json:"max_open_conns"`
-		MaxIdleConns int    `json:"max_idle_conns"`
-		MaxLifeTime  int    `json:"max_life_time"`
-	} `json:"database"`
-}
-
 // 判题结果信息结构体
 type JudgeResultMessage struct {
 	UserID    int    `json:"user_id"`

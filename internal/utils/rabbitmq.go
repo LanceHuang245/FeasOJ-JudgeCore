@@ -8,22 +8,19 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
-// ConnectRabbitMQ 建立与 RabbitMQ 的连接
-func ConnectRabbitMQ() (*amqp.Connection, *amqp.Channel, error) {
-	// 连接到 RabbitMQ 服务
-	conn, err := amqp.Dial(config.GetRabbitMQAddress())
+// ConnectRabbitMQ RabbitMQ连接
+func ConnectRabbitMQ(rmqConfig config.RabbitMQ) (*amqp.Connection, *amqp.Channel, error) {
+	conn, err := amqp.Dial(rmqConfig.Address)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	// 创建一个通道
 	ch, err := conn.Channel()
 	if err != nil {
 		conn.Close()
 		return nil, nil, err
 	}
 
-	// 确保队列存在
 	_, err = ch.QueueDeclare(
 		"judgeTask", // 队列名称
 		true,        // 是否持久化
@@ -41,8 +38,8 @@ func ConnectRabbitMQ() (*amqp.Connection, *amqp.Channel, error) {
 	return conn, ch, nil
 }
 
+// PublishJudgeResult 将判题结果发布到消息队列
 func PublishJudgeResult(ch *amqp.Channel, result global.JudgeResultMessage) error {
-	// 声明结果队列
 	_, err := ch.QueueDeclare(
 		"judgeResults", // 队列名称
 		true,           // 持久化

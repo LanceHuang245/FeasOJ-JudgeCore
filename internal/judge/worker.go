@@ -12,6 +12,7 @@ import (
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
+	"gorm.io/gorm"
 )
 
 type Task struct {
@@ -21,14 +22,13 @@ type Task struct {
 }
 
 // ProcessJudgeTasks 函数用于处理判题任务
-func ProcessJudgeTasks() {
+func ProcessJudgeTasks(rmqConfig config.RabbitMQ, db *gorm.DB, pool *JudgePool) {
 	var conn *amqp.Connection
 	var ch *amqp.Channel
 	var err error
 
-	// 若断开则自动重连
 	for {
-		conn, ch, err = utils.ConnectRabbitMQ()
+		conn, ch, err = utils.ConnectRabbitMQ(rmqConfig)
 		if err != nil {
 			log.Println("[FeasOJ] RabbitMQ connect error, retrying in 3s: ", err)
 			time.Sleep(3 * time.Second)
@@ -40,15 +40,12 @@ func ProcessJudgeTasks() {
 	defer conn.Close()
 	defer ch.Close()
 
-	// 创建一个任务通道
 	taskChan := make(chan Task)
-	// 创建一个等待组
 	var wg sync.WaitGroup
 
-	// 创建多个 worker 协程
-	for range config.GetMaxSandbox() {
+	for i := 0; i < pool.sandboxConfig.MaxConcurrent; i++ {
 		wg.Add(1)
-		go worker(taskChan, ch, &wg)
+		go worker(taskChan, ch, &wg, db, pool)
 	}
 
 	for {
@@ -69,7 +66,7 @@ func ProcessJudgeTasks() {
 			conn.Close()
 			ch.Close()
 			for {
-				conn, ch, err = utils.ConnectRabbitMQ()
+				conn, ch, err = utils.ConnectRabbitMQ(rmqConfig)
 				if err != nil {
 					log.Println("[FeasOJ] RabbitMQ reconnect error, retrying in 3s: ", err)
 					time.Sleep(3 * time.Second)
@@ -80,49 +77,51 @@ func ProcessJudgeTasks() {
 			continue
 		}
 
-		// 无限循环处理任务
 		for msg := range msgs {
 			taskData := string(msg.Body)
-			// 将任务分割成用户ID和题目ID
 			parts := strings.Split(taskData, "_")
-			uid := parts[0]
-			pid := strings.Split(parts[1], ".")[0]
-			// 将用户ID和题目ID转换为整数
-			uidInt, err := strconv.Atoi(uid)
-			if err != nil {
-				log.Panic(err)
+			if len(parts) < 2 {
+				log.Printf("[FeasOJ] Invalid task data format: %s", taskData)
+				continue
 			}
-			pidInt, err := strconv.Atoi(pid)
-			if err != nil {
-				log.Panic(err)
-			}
+			uid, _ := strconv.Atoi(parts[0])
+			pidStr := strings.Split(parts[1], ".")[0]
+			pid, _ := strconv.Atoi(pidStr)
 
-			// 将任务发送到任务通道
-			taskChan <- Task{UID: uidInt, PID: pidInt, Name: taskData}
+			taskChan <- Task{UID: uid, PID: pid, Name: taskData}
 		}
+		log.Println("[FeasOJ] RabbitMQ channel closed. Exiting task processor.")
 		break
 	}
 
-	// 等待所有 worker 完成
+	close(taskChan)
 	wg.Wait()
 }
 
 // worker 使用容器池执行任务
-func worker(taskChan chan Task, ch *amqp.Channel, wg *sync.WaitGroup) {
-	// 使用 defer 关键字，在函数结束时调用 wg.Done()，表示任务完成
+func worker(taskChan chan Task, ch *amqp.Channel, wg *sync.WaitGroup, db *gorm.DB, pool *JudgePool) {
 	defer wg.Done()
-	// 从任务通道中获取任务
-	for task := range taskChan {
-		// 从容器池中获取一个空闲容器
-		containerID := AcquireContainer()
-		// 将容器ID存储到全局变量中
-		global.ContainerIDs.Store(task.Name, containerID)
-		// 执行编译与运行
-		result := CompileAndRun(task.Name, containerID)
-		// 更新判题状态
-		sql.ModifyJudgeStatus(task.UID, task.PID, result)
 
-		// 发送结果到消息队列
+	for task := range taskChan {
+		problem, err := sql.SelectProblemByPid(db, task.PID)
+		if err != nil {
+			log.Printf("[FeasOJ] Failed to get problem info for PID %d: %v", task.PID, err)
+			continue
+		}
+
+		testCases := sql.SelectTestCasesByPid(db, task.PID)
+		if len(testCases) == 0 {
+			log.Printf("[FeasOJ] No test cases found for PID %d", task.PID)
+			sql.ModifyJudgeStatus(db, task.UID, task.PID, global.SystemError)
+			continue
+		}
+
+		containerID := pool.AcquireContainer()
+		pool.containerIDs.Store(task.Name, containerID)
+
+		result := CompileAndRun(task.Name, containerID, problem, testCases)
+		sql.ModifyJudgeStatus(db, task.UID, task.PID, result)
+
 		resultMsg := global.JudgeResultMessage{
 			UserID:    task.UID,
 			ProblemID: task.PID,
@@ -133,7 +132,7 @@ func worker(taskChan chan Task, ch *amqp.Channel, wg *sync.WaitGroup) {
 			log.Printf("[FeasOJ] Failed to publish result: %v", err)
 		}
 
-		// 将容器归还到池中（内部会先重置环境）
-		ReleaseContainer(containerID)
+		pool.ReleaseContainer(containerID)
+		pool.containerIDs.Delete(task.Name)
 	}
 }

@@ -1,9 +1,7 @@
 package judge
 
 import (
-	"JudgeCore/internal/config"
 	"JudgeCore/internal/global"
-	"JudgeCore/internal/utils/sql"
 	"context"
 	"errors"
 	"fmt"
@@ -23,32 +21,28 @@ import (
 )
 
 // BuildImage 构建Sandbox
-func BuildImage() bool {
+func BuildImage(currentDir string) bool {
 	ctx := context.Background()
 
-	// 创建一个新的Docker客户端
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
 		log.Println("[FeasOJ] Error creating Docker client: ", err)
 		return false
 	}
 
-	// 将Dockerfile目录打包成tar格式
-	tar, err := archive.TarWithOptions(global.CurrentDir, &archive.TarOptions{})
+	tar, err := archive.TarWithOptions(currentDir, &archive.TarOptions{})
 	if err != nil {
 		log.Println("[FeasOJ] Error creating tar: ", err)
 		return false
 	}
 
-	// 设置镜像构建选项
 	buildOptions := build.ImageBuildOptions{
-		Context:    tar,                          // 构建上下文
-		Dockerfile: "Sandbox",                    // Dockerfile文件名
-		Tags:       []string{"judgecore:latest"}, // 镜像标签
+		Context:    tar,
+		Dockerfile: "Sandbox",
+		Tags:       []string{"judgecore:latest"},
 	}
 
 	log.Println("[FeasOJ] SandBox is being built...")
-	// 构建Docker镜像
 	buildResponse, err := cli.ImageBuild(ctx, tar, buildOptions)
 	if err != nil {
 		log.Println("[FeasOJ] Error building Docker image: ", err)
@@ -56,7 +50,6 @@ func BuildImage() bool {
 	}
 	defer buildResponse.Body.Close()
 
-	// 打印构建响应
 	_, err = io.Copy(log.Writer(), buildResponse.Body)
 	if err != nil {
 		log.Printf("[FeasOJ] Error copying build response: %v", err)
@@ -65,81 +58,22 @@ func BuildImage() bool {
 	return true
 }
 
-// StartContainer 启动Docker容器
-func StartContainer() (string, error) {
-	ctx := context.Background()
-
-	// 创建Docker客户端
-	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
-	if err != nil {
-		return "", err
-	}
-
-	// 配置容器配置
-	containerConfig := &container.Config{
-		Image: "judgecore:latest",
-		Cmd:   []string{"sh"},
-		Tty:   true,
-	}
-
-	// 配置主机配置
-	hostConfig := &container.HostConfig{
-		Resources: container.Resources{
-			Memory:    config.GetSandboxMemory(),
-			NanoCPUs:  int64(config.GetSandboxNanoCPUs() * 1e9),
-			CPUShares: config.GetSandboxCPUShares(),
-		},
-		Binds: []string{
-			global.CodeDir + ":/workspace", // 挂载文件夹
-		},
-		AutoRemove: true, // 容器退出后自动删除
-		CapDrop:    []string{"ALL"},
-	}
-
-	// 创建容器
-	resp, err := cli.ContainerCreate(ctx, containerConfig, hostConfig, nil, nil, "")
-	if err != nil {
-		return "", err
-	}
-
-	// 启动容器
-	if err := cli.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
-		return "", err
-	}
-
-	return resp.ID, nil
-}
-
-// ResetContainer 只清理任务专属的目录，而不影响其他任务
-func ResetContainer(containerID, taskDir string) error {
-	resetCmd := exec.Command("docker", "exec", containerID, "sh", "-c", fmt.Sprintf("rm -rf %s", taskDir))
-	if err := resetCmd.Run(); err != nil {
-		log.Printf("[FeasOJ] Error cleaning task directory %s in container %s: %v", taskDir, containerID, err)
-		return err
-	}
-	return nil
-}
-
 // CompileAndRun 编译并运行代码
-func CompileAndRun(filename string, containerID string) string {
-	// 生成唯一任务目录（使用当前时间戳纳秒值）
+func CompileAndRun(filename string, containerID string, problem *global.Problem, testCases []*global.TestCaseRequest) string {
 	taskDir := fmt.Sprintf("/workspace/task_%d", time.Now().UnixNano())
 
-	// 在容器内创建任务目录
 	mkdirCmd := exec.Command("docker", "exec", containerID, "mkdir", "-p", taskDir)
 	if err := mkdirCmd.Run(); err != nil {
-		return "Internal Error"
+		return global.SystemError
 	}
 
-	// 将代码文件从挂载的workspace目录复制到任务目录中
 	copyCmd := exec.Command("docker", "exec", containerID, "cp", fmt.Sprintf("/workspace/%s", filename), taskDir)
 	if err := copyCmd.Run(); err != nil {
-		return "Internal Error"
+		return global.SystemError
 	}
 
-	// 确保任务结束后清理任务目录
 	defer func() {
-		if err := ResetContainer(containerID, taskDir); err != nil {
+		if err := resetTaskDirectory(containerID, taskDir); err != nil {
 			log.Printf("[FeasOJ] Reset task dir %s error: %v", taskDir, err)
 		}
 	}()
@@ -147,39 +81,10 @@ func CompileAndRun(filename string, containerID string) string {
 	ext := filepath.Ext(filename)
 	var compileCmd *exec.Cmd
 
-	// 解析题目ID
-	baseName := strings.TrimSuffix(filename, filepath.Ext(filename)) // 去除扩展名
-	parts := strings.Split(baseName, "_")
-	pid, err := strconv.Atoi(parts[1])
+	timeLimitSeconds, memoryLimitKB, err := parseLimits(problem)
 	if err != nil {
-		return "Internal Error"
+		return global.SystemError
 	}
-
-	// 查询题目信息
-	problem := sql.SelectProblemByPid(pid)
-
-	// 解析时间限制和内存限制
-	timeLimitStr := problem.Timelimit
-	re := regexp.MustCompile(`\d+`)
-	timeMatches := re.FindAllString(timeLimitStr, -1)
-	if len(timeMatches) == 0 {
-		return "Internal Error"
-	}
-	timeLimitSeconds, err := strconv.Atoi(timeMatches[0])
-	if err != nil {
-		return "Internal Error"
-	}
-
-	memoryLimitStr := problem.Memorylimit
-	memMatches := re.FindAllString(memoryLimitStr, -1)
-	if len(memMatches) == 0 {
-		return "Internal Error"
-	}
-	memoryLimitMB, err := strconv.Atoi(memMatches[0])
-	if err != nil {
-		return "Internal Error"
-	}
-	memoryLimitKB := memoryLimitMB * 1024 // 转换为KB
 
 	switch ext {
 	case ".cpp":
@@ -189,9 +94,8 @@ func CompileAndRun(filename string, containerID string) string {
 		renameCmd := exec.Command("docker", "exec", containerID, "sh", "-c",
 			fmt.Sprintf("mv %s/%s %s/Main.java", taskDir, filename, taskDir))
 		if err := renameCmd.Run(); err != nil {
-			return "Compile Failed"
+			return global.CompileError
 		}
-		// 编译Java代码
 		compileCmd = exec.Command("docker", "exec", containerID, "sh", "-c",
 			fmt.Sprintf("javac %s/Main.java", taskDir))
 	case ".rs":
@@ -202,53 +106,24 @@ func CompileAndRun(filename string, containerID string) string {
 		compileCmd = exec.Command("docker", "exec", containerID, "sh", "-c",
 			fmt.Sprintf("php -l %s/%s", taskDir, filename))
 	case ".pas":
-		// FPC编译Pas
 		exeName := strings.TrimSuffix(filename, ".pas")
 		compileCmd = exec.Command("docker", "exec", containerID, "sh", "-c",
 			fmt.Sprintf("fpc -v0 -O2 %s/%s -o%s/%s", taskDir, filename, taskDir, exeName))
-	default:
-
 	}
 
 	if compileCmd != nil {
 		if err := compileCmd.Run(); err != nil {
-			return "Compile Failed"
+			return global.CompileError
 		}
 	}
 
-	testCases := sql.SelectTestCasesByPid(pid)
 	for _, testCase := range testCases {
-		// 每个测试用例使用独立的context，超时时间为题目限制+1秒缓冲
 		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeLimitSeconds+1)*time.Second)
 		defer cancel()
 
-		var cmdStr string
-		// TODO: Java的内存限制需要进行测试并找到最优方案
-		switch ext {
-		case ".cpp":
-			cmdStr = fmt.Sprintf("ulimit -v %d && timeout -s SIGKILL %ds %s/%s.out", memoryLimitKB, timeLimitSeconds, taskDir, filename)
-		case ".java":
-			heapSizeMB := max(memoryLimitKB/1024, 32)
-			// 设定最大堆、初始堆、最大总内存比例
-			cmdStr = fmt.Sprintf(
-				"ulimit -v %d && timeout -s SIGKILL %ds java -cp %s -Xms%dm -Xmx%dm -XX:MaxRAMPercentage=80.0 Main",
-				memoryLimitKB, timeLimitSeconds, taskDir, heapSizeMB, heapSizeMB,
-			)
-		case ".py":
-			cmdStr = fmt.Sprintf("ulimit -v %d && timeout -s SIGKILL %ds python %s/%s", memoryLimitKB, timeLimitSeconds, taskDir, filename)
-		case ".rs":
-			exeName := strings.TrimSuffix(filename, ".rs")
-			cmdStr = fmt.Sprintf("ulimit -v %d && timeout -s SIGKILL %ds %s/%s",
-				memoryLimitKB, timeLimitSeconds, taskDir, exeName)
-		case ".php":
-			cmdStr = fmt.Sprintf("ulimit -v %d && timeout -s SIGKILL %ds php %s/%s",
-				memoryLimitKB, timeLimitSeconds, taskDir, filename)
-		case ".pas":
-			exeName := strings.TrimSuffix(filename, ".pas")
-			cmdStr = fmt.Sprintf("ulimit -v %d && timeout -s SIGKILL %ds %s/%s",
-				memoryLimitKB, timeLimitSeconds, taskDir, exeName)
-		default:
-			return "Failed"
+		cmdStr := buildRunCommand(ext, filename, taskDir, timeLimitSeconds, memoryLimitKB)
+		if cmdStr == "" {
+			return global.SystemError
 		}
 
 		runCmd := exec.CommandContext(ctx, "docker", "exec", "-i", containerID, "sh", "-c", cmdStr)
@@ -256,51 +131,106 @@ func CompileAndRun(filename string, containerID string) string {
 		output, err := runCmd.CombinedOutput()
 
 		if ctx.Err() == context.DeadlineExceeded {
-			return "Time Limit Exceeded"
+			return global.TimeLimitExceeded
 		}
 
 		if err != nil {
 			var exitErr *exec.ExitError
 			if errors.As(err, &exitErr) {
-				exitCode := exitErr.ExitCode()
-				switch exitCode {
-				case 124: // timeout触发
-					return "Time Limit Exceeded"
-				case 137: // SIGKILL，可能是内存超限
-					return "Memory Limit Exceeded"
-				default:
-
+				switch exitErr.ExitCode() {
+				case 124: // timeout 触发
+					return global.TimeLimitExceeded
+				case 137: // SIGKILL, 可能是内存超限
+					return global.MemoryLimitExceeded
 				}
 			}
-			return "Failed"
+			return global.RuntimeError
 		}
 
-		// 添加调试信息
 		expectedOutput := strings.TrimSpace(testCase.OutputData)
 		actualOutput := strings.TrimSpace(string(output))
 
 		if actualOutput != expectedOutput {
-			return "Wrong Answer"
+			return global.WrongAnswer
 		}
 	}
 
-	return "Accepted"
+	return global.Accepted
 }
 
 // TerminateContainer 终止并删除Docker容器
-func TerminateContainer(containerID string) bool {
+func TerminateContainer(containerID string) {
 	ctx := context.Background()
 
-	// 创建Docker客户端
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
-		panic(err)
+		log.Printf("[FeasOJ] Error creating Docker client for termination: %v", err)
+		return
 	}
 
-	// 终止容器
 	if err := cli.ContainerStop(ctx, containerID, container.StopOptions{}); err != nil {
-		panic(err)
+		log.Printf("[FeasOJ] Error stopping container %s: %v", containerID, err)
+	}
+}
+
+func resetTaskDirectory(containerID, taskDir string) error {
+	resetCmd := exec.Command("docker", "exec", containerID, "sh", "-c", fmt.Sprintf("rm -rf %s", taskDir))
+	if err := resetCmd.Run(); err != nil {
+		log.Printf("[FeasOJ] Error cleaning task directory %s in container %s: %v", taskDir, containerID, err)
+		return err
+	}
+	return nil
+}
+
+func parseLimits(problem *global.Problem) (timeLimit int, memoryLimit int, err error) {
+	re := regexp.MustCompile(`\d+`)
+
+	timeMatches := re.FindAllString(problem.Timelimit, -1)
+	if len(timeMatches) == 0 {
+		return 0, 0, fmt.Errorf("no time limit found")
+	}
+	timeLimit, err = strconv.Atoi(timeMatches[0])
+	if err != nil {
+		return 0, 0, err
 	}
 
-	return true
+	memMatches := re.FindAllString(problem.Memorylimit, -1)
+	if len(memMatches) == 0 {
+		return 0, 0, fmt.Errorf("no memory limit found")
+	}
+	memoryLimitMB, err := strconv.Atoi(memMatches[0])
+	if err != nil {
+		return 0, 0, err
+	}
+	memoryLimit = memoryLimitMB * 1024 // 转换为KB
+
+	return timeLimit, memoryLimit, nil
+}
+
+func buildRunCommand(ext, filename, taskDir string, timeLimit, memoryLimit int) string {
+	switch ext {
+	case ".cpp":
+		return fmt.Sprintf("ulimit -v %d && timeout -s SIGKILL %ds %s/%s.out", memoryLimit, timeLimit, taskDir, filename)
+	case ".java":
+		heapSizeMB := max(memoryLimit/1024, 32)
+		return fmt.Sprintf(
+			"ulimit -v %d && timeout -s SIGKILL %ds java -cp %s -Xms%dm -Xmx%dm -XX:MaxRAMPercentage=80.0 Main",
+			memoryLimit, timeLimit, taskDir, heapSizeMB, heapSizeMB,
+		)
+	case ".py":
+		return fmt.Sprintf("ulimit -v %d && timeout -s SIGKILL %ds python %s/%s", memoryLimit, timeLimit, taskDir, filename)
+	case ".rs":
+		exeName := strings.TrimSuffix(filename, ".rs")
+		return fmt.Sprintf("ulimit -v %d && timeout -s SIGKILL %ds %s/%s",
+			memoryLimit, timeLimit, taskDir, exeName)
+	case ".php":
+		return fmt.Sprintf("ulimit -v %d && timeout -s SIGKILL %ds php %s/%s",
+			memoryLimit, timeLimit, taskDir, filename)
+	case ".pas":
+		exeName := strings.TrimSuffix(filename, ".pas")
+		return fmt.Sprintf("ulimit -v %d && timeout -s SIGKILL %ds %s/%s",
+			memoryLimit, timeLimit, taskDir, exeName)
+	default:
+		return ""
+	}
 }
