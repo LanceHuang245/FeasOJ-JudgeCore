@@ -1,6 +1,9 @@
 # FeasOJ-JudgeCore
 FeasOJ JudgeCore
 
+> 为统一项目管理与规范化，JudgeCore将迁移至[FeasOJ](https://github.com/LanceHuang245/FeasOJ)
+> For unified project management and standardization, JudgeCore will be migrating to [FeasOJ](https://github.com/LanceHuang245/FeasOJ)
+
 ### Project Description
 FeasOJ is an online programming practice platform based on Vue and Golang, supporting multi-languages, discussion forums, contests and other features, aiming to provide users with a convenient and efficient learning and practice environment.
 <br>
